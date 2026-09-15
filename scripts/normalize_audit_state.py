@@ -5,13 +5,21 @@ from pathlib import Path
 STATE_PATH = Path("data/audit_process_state.json")
 HTML_PATH = Path("index.html")
 
-# Conservative evidence rules. Maturity is a property of operational adoption,
-# not of how impressive an AI news item sounds.
+# Maturity measures operational adoption, not AI capability.
+# Each level requires evidence in the current process description.
 LEVEL_EVIDENCE = {
     2: re.compile(r"試行|一部利用|パイロット|PoC|実証|導入", re.I),
     3: re.compile(r"定型運用|定常運用|標準運用|本番運用|定着|実運用|工程に組み込み", re.I),
-    4: re.compile(r"工程連携|横断|複数工程|統合運用|連携運用", re.I),
-    5: re.compile(r"継続監視|フィードバック|改善サイクル|継続的高度化|自律", re.I),
+    4: re.compile(r"工程連携|複数工程|複数部門|横断運用|統合運用|連携運用", re.I),
+    5: re.compile(r"継続監視|フィードバック.*改善|改善サイクル|継続的高度化|自動.*フィードバック|自律運用", re.I),
+}
+
+MATURITY_RUBRIC = {
+    1: "検討段階：活用方法を検討・情報収集している",
+    2: "試行段階：PoC・パイロット・一部利用・導入を開始している",
+    3: "定着段階：定型・定常・標準・本番運用として工程に組み込まれている",
+    4: "連携段階：複数工程・部門をまたいで統合・連携して運用している",
+    5: "高度化段階：継続監視とフィードバックを伴う改善サイクル・自律運用が定着している",
 }
 
 
