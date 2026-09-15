@@ -1,0 +1,57 @@
+name: V2 Weekly AI Update Report
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Generate structured report
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python -u scripts/generate_report.py
+
+      - name: Validate V2 output
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          html = Path('index.html').read_text(encoding='utf-8')
+          state = json.loads(Path('data/audit_process_state.json').read_text(encoding='utf-8'))
+          required = [
+              '今週の重要アップデートTOP5','ChatGPT / OpenAI','Gemini / Google',
+              'Claude / Anthropic','Microsoft Copilot','内部監査への示唆',
+              '内部監査プロセスの高度化への有用性','今後ウォッチすべき事項','情報源',
+              '① リスク評価','② 監査計画','③ 資料収集','④ 分析・検証',
+              '⑤ 指摘・原因分析','⑥ 報告','⑦ フォローアップ'
+          ]
+          missing = [x for x in required if x not in html]
+          if set(state['processes']) != set(map(str, range(1,8))):
+              raise SystemExit('Audit process state must contain exactly seven stages.')
+          if len(state.get('history', [])) < 1:
+              raise SystemExit('History was not recorded.')
+          if missing:
+              raise SystemExit('Missing HTML sections: ' + ', '.join(missing))
+          print('V2 validation passed.')
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html data/audit_process_state.json
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+          else
+            git commit -m 'Update V2 AI audit intelligence report'
+            git push
+          fi
