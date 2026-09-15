@@ -59,7 +59,7 @@ def call_gemini(prompt):
                 data = json.loads(r.read().decode())
             return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"] if isinstance(p, dict)).strip()
         except urllib.error.HTTPError as e:
-            body = e.read().decode(errors="replace")
+            e.read()
             print(f"Gemini HTTP {e.code} on attempt {attempt}/5")
             if e.code != 429 or attempt == 5:
                 raise
@@ -81,10 +81,18 @@ def parse_json(text):
     return json.loads(text[start:end + 1])
 
 
+def previous_snapshot(state):
+    history = state.get("history", [])
+    today = state.get("last_updated", "")
+    candidates = [x for x in history if x.get("date") and x.get("date") != today]
+    return candidates[-1].get("processes", {}) if candidates else {}
+
+
 def main():
     with open(STATE_PATH, encoding="utf-8") as f:
         state = json.load(f)
     old = state["processes"]
+    prev = previous_snapshot(state)
     news = "\n\n".join([
         "OpenAI:\n" + fetch_news("site:openai.com ChatGPT OpenAI"),
         "Google:\n" + fetch_news("site:blog.google Gemini Google AI"),
@@ -137,13 +145,30 @@ process_updatesのmaturityは上記定義に従う1～5の候補値です。最�
         else:
             item["status"] = "unchanged"
 
+    # Explicit week-over-week delta for auditability.
+    changes = []
+    for key in map(str, range(1, 8)):
+        current_level = int(old[key].get("maturity", 1))
+        previous_level = int(prev.get(key, {}).get("maturity", current_level))
+        delta = current_level - previous_level
+        changes.append({
+            "process": key,
+            "name": old[key].get("name", ""),
+            "previous_maturity": previous_level,
+            "current_maturity": current_level,
+            "delta": delta,
+            "status": old[key].get("status", "unchanged"),
+            "reason": old[key].get("change_reason", "") if delta != 0 or old[key].get("status") == "updated" else "",
+        })
     state["last_updated"] = TODAY
+    state["maturity_changes"] = changes
+    state["history"] = [x for x in state.get("history", []) if x.get("date") != TODAY]
     state["history"].append({"date": TODAY, "processes": json.loads(json.dumps(old, ensure_ascii=False))})
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
     def li(text): return "<li>" + escape(str(text)) + "</li>"
-    html = ['<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI・内部監査継続的高度化レポート</title><style>body{font-family:system-ui,-apple-system,sans-serif;background:#f4f6f8;color:#202124;margin:0;padding:18px;line-height:1.7}main{max-width:1000px;margin:auto}section,header,footer{background:white;padding:20px;border-radius:14px;margin-bottom:16px;box-shadow:0 2px 10px #0001}h1{margin-top:0}h2{border-bottom:2px solid #eee;padding-bottom:6px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:9px;vertical-align:top}th{background:#f7f7f7}.updated{background:#fde7e9;color:#b3261e;font-weight:700}.unchanged{background:#f1f3f4;color:#5f6368;font-weight:700}.score{font-size:1.4em}@media(max-width:600px){body{padding:9px}section,header,footer{padding:14px}table{display:block;overflow-x:auto}}</style></head><body><main>']
+    html = ['<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI・内部監査継続的高度化レポート</title><style>body{font-family:system-ui,-apple-system,sans-serif;background:#f4f6f8;color:#202124;margin:0;padding:18px;line-height:1.7}main{max-width:1000px;margin:auto}section,header,footer{background:white;padding:20px;border-radius:14px;margin-bottom:16px;box-shadow:0 2px 10px #0001}h1{margin-top:0}h2{border-bottom:2px solid #eee;padding-bottom:6px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:9px;vertical-align:top}th{background:#f7f7f7}.updated{background:#fde7e9;color:#b3261e;font-weight:700}.unchanged{background:#f1f3f4;color:#5f6368;font-weight:700}.score{font-size:1.4em}.up{font-weight:700}.flat{font-weight:600}@media(max-width:600px){body{padding:9px}section,header,footer{padding:14px}table{display:block;overflow-x:auto}}</style></head><body><main>']
     html.append(f'<header><h1>AI・内部監査継続的高度化レポート</h1><p><strong>基準日：</strong>{escape(TODAY)}</p><p>AIアップデートを内部監査7工程の継続的な高度化へ結び付け、前週からの変化を蓄積します。</p></header>')
     html.append('<section><h2>1. 今週の重要アップデートTOP5</h2><table><tr><th>重要度</th><th>項目</th><th>確認できた事実</th><th>監査上の確認事項</th></tr>')
     for x in result.get("top5", [])[:5]:
@@ -157,17 +182,27 @@ process_updatesのmaturityは上記定義に従う1～5の候補値です。最�
             html.append(li(x if isinstance(x, str) else f"{x.get('title','')}: {x.get('fact','')} / 監査: {x.get('audit','')}"))
         html.append('</ul></section>')
     html.append(f'<section><h2>6. 内部監査への示唆</h2><p>{escape(str(result.get("audit_implication","")))}</p></section>')
-    html.append('<section><h2>7. 内部監査プロセスの高度化への有用性</h2><table><tr><th>工程</th><th>状態</th><th>成熟度</th><th>内容</th></tr>')
+    html.append('<section><h2>7. 内部監査プロセスの高度化への有用性</h2><table><tr><th>工程</th><th>状態</th><th>成熟度</th><th>前週比</th><th>内容</th></tr>')
     labels = {"1":"① リスク評価","2":"② 監査計画","3":"③ 資料収集","4":"④ 分析・検証","5":"⑤ 指摘・原因分析","6":"⑥ 報告","7":"⑦ フォローアップ"}
-    for key in map(str, range(1,8)):
+    for change in changes:
+        key = change["process"]
         p = old[key]
         cls = "updated" if p["status"] == "updated" else "unchanged"
-        label = "更新あり" if p["status"] == "updated" else "更新なし"
-        html.append(f'<tr><td>{labels[key]}</td><td class="{cls}">{label}</td><td>{p.get("maturity",1)}/5</td><td>{escape(p["current"])}</td></tr>')
+        delta = change["delta"]
+        delta_text = f'+{delta}' if delta > 0 else str(delta)
+        html.append(f'<tr><td>{labels[key]}</td><td class="{cls}">{"更新あり" if p["status"] == "updated" else "更新なし"}</td><td>{change["current_maturity"]}/5</td><td class="{"up" if delta > 0 else "flat"}">{delta_text}</td><td>{escape(p["current"])}</td></tr>')
     html.append('</table><h3>成熟度の判定基準</h3><table><tr><th>Lv</th><th>基準</th></tr>')
     for level, description in MATURITY_RUBRIC.items():
         html.append(f'<tr><td>{level}/5</td><td>{escape(description)}</td></tr>')
-    html.append('</table><p><strong>原則：</strong>AIの出力は監査証拠そのものではありません。原資料・ログ・承認記録と突き合わせ、監査人が最終判断します。</p></section>')
+    html.append('</table><h3>今週の変化</h3><ul>')
+    for change in changes:
+        if change["delta"] != 0 or change["status"] == "updated":
+            text = f'{change["name"]}: {change["previous_maturity"]}/5 → {change["current_maturity"]}/5'
+            if change["reason"]: text += f' — {change["reason"]}'
+            html.append(li(text))
+    if not any(c["delta"] != 0 or c["status"] == "updated" for c in changes):
+        html.append(li("成熟度の変化はありません。"))
+    html.append('</ul><p><strong>原則：</strong>AIの出力は監査証拠そのものではありません。原資料・ログ・承認記録と突き合わせ、監査人が最終判断します。</p></section>')
     html.append('<section><h2>8. 今後ウォッチすべき事項</h2><ul>' + ''.join(li(x) for x in result.get("watch", [])[:5]) + '</ul></section>')
     html.append('<section><h2>9. 情報源</h2><ul>')
     for s in result.get("sources", []):
