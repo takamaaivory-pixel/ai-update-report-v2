@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 STATE_PATH = Path("data/audit_process_state.json")
+HTML_PATH = Path("index.html")
 
 # Conservative evidence rules. Maturity is a property of operational adoption,
 # not of how impressive an AI news item sounds.
@@ -33,9 +34,25 @@ def normalize_history(history, today):
         if date not in by_date:
             order.append(date)
         by_date[date] = entry
-    # The current run will be appended separately.
     order = [d for d in order if d != today]
     return [by_date[d] for d in order]
+
+
+def update_html_maturity(processes):
+    if not HTML_PATH.exists():
+        return
+    html = HTML_PATH.read_text(encoding="utf-8")
+    values = [str(processes[str(i)].get("maturity", 1)) + "/5" for i in range(1, 8)]
+    marker = '<section><h2>7. 内部監査プロセスの高度化への有用性</h2>'
+    start = html.find(marker)
+    if start < 0:
+        return
+    end = html.find('</section>', start)
+    if end < 0:
+        return
+    section = html[start:end]
+    section = re.sub(r'<td>[1-5]/5</td>', lambda m, it=iter(values): f'<td>{next(it)}</td>', section, count=7)
+    HTML_PATH.write_text(html[:start] + section + html[end:], encoding="utf-8")
 
 
 def main():
@@ -47,7 +64,6 @@ def main():
     # It also cannot exceed the operational evidence visible in the current text.
     previous_by_key = {}
     if old_history:
-        # Use the latest snapshot after duplicate-date normalization as the baseline.
         normalized = normalize_history(old_history, today)
         if normalized:
             previous_by_key = normalized[-1].get("processes", {})
@@ -62,8 +78,6 @@ def main():
         guarded = min(candidate, previous_maturity + 1, operational_level)
         process["maturity"] = max(previous_maturity, guarded)
 
-        # An unchanged process must not acquire a new maturity level merely because
-        # the model returned a different number while saying nothing changed.
         if process.get("status") != "updated":
             process["maturity"] = previous_maturity
 
@@ -74,6 +88,7 @@ def main():
     })
 
     STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    update_html_maturity(state["processes"])
 
 
 if __name__ == "__main__":
