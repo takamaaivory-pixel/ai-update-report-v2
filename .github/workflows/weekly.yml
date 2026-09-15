@@ -26,6 +26,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python -u scripts/generate_report.py
 
+      - name: Normalize audit state
+        run: python -u scripts/normalize_audit_state.py
+
       - name: Validate V2 output
         run: |
           python - <<'PY'
@@ -47,6 +50,9 @@ jobs:
               raise SystemExit('History was not recorded.')
           if missing:
               raise SystemExit('Missing HTML sections: ' + ', '.join(missing))
+          dates = [x.get('date') for x in state.get('history', [])]
+          if len(dates) != len(set(dates)):
+              raise SystemExit('History contains duplicate dates.')
           print('V2 validation passed.')
           PY
 
