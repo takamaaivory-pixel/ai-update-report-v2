@@ -121,5 +121,70 @@
         }
       }
     }
+  ],
+  "maturity_changes": [
+    {
+      "process": "1",
+      "name": "リスク評価",
+      "previous_maturity": 1,
+      "current_maturity": 1,
+      "delta": 0,
+      "status": "unchanged",
+      "reason": ""
+    },
+    {
+      "process": "2",
+      "name": "監査計画",
+      "previous_maturity": 1,
+      "current_maturity": 1,
+      "delta": 0,
+      "status": "unchanged",
+      "reason": ""
+    },
+    {
+      "process": "3",
+      "name": "資料収集",
+      "previous_maturity": 1,
+      "current_maturity": 1,
+      "delta": 0,
+      "status": "unchanged",
+      "reason": ""
+    },
+    {
+      "process": "4",
+      "name": "分析・検証",
+      "previous_maturity": 2,
+      "current_maturity": 2,
+      "delta": 0,
+      "status": "unchanged",
+      "reason": ""
+    },
+    {
+      "process": "5",
+      "name": "指摘・原因分析",
+      "previous_maturity": 1,
+      "current_maturity": 1,
+      "delta": 0,
+      "status": "unchanged",
+      "reason": ""
+    },
+    {
+      "process": "6",
+      "name": "報告",
+      "previous_maturity": 1,
+      "current_maturity": 1,
+      "delta": 0,
+      "status": "unchanged",
+      "reason": ""
+    },
+    {
+      "process": "7",
+      "name": "フォローアップ",
+      "previous_maturity": 1,
+      "current_maturity": 1,
+      "delta": 0,
+      "status": "unchanged",
+      "reason": ""
+    }
   ]
 }
