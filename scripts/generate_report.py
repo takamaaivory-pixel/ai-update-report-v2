@@ -18,6 +18,14 @@ TODAY = datetime.now(JST).strftime("%Y-%m-%d")
 MODEL = "gemini-3.1-flash-lite"
 STATE_PATH = "data/audit_process_state.json"
 
+MATURITY_RUBRIC = {
+    1: "検討段階：活用方法を検討・情報収集している",
+    2: "試行段階：PoC・パイロット・一部利用・導入を開始している",
+    3: "定着段階：定型・定常・標準・本番運用として工程に組み込まれている",
+    4: "連携段階：複数工程・部門をまたいで統合・連携して運用している",
+    5: "高度化段階：継続監視とフィードバックを伴う改善サイクル・自律運用が定着している",
+}
+
 
 def fetch_news(query, limit=6):
     params = urllib.parse.urlencode({"q": f"{query} when:7d", "hl": "en-US", "gl": "US", "ceid": "US:en"})
@@ -84,11 +92,21 @@ def main():
         "Microsoft:\n" + fetch_news("site:techcommunity.microsoft.com Copilot Microsoft"),
         "Broader:\n" + fetch_news("OpenAI ChatGPT OR Google Gemini OR Anthropic Claude OR Microsoft Copilot"),
     ])
+    rubric_text = "\n".join(f"Lv{k}: {v}" for k, v in MATURITY_RUBRIC.items())
     prompt = f'''あなたは内部監査・AIガバナンス向け週刊レポート編集者です。基準日={TODAY}。
 ニュース候補だけを根拠に、事実と監査上の考察を分けてください。創作は禁止。確認できない製品名・機能・価格・URLは出さないでください。
 
 現在の7工程状態:
 {json.dumps(old, ensure_ascii=False, indent=2)}
+
+成熟度の定義（AI機能の性能ではなく、監査工程への実運用の定着度）:
+{rubric_text}
+
+重要ルール:
+- ニュースにAI機能の高度化があっても、それだけで監査工程の成熟度を上げないでください。
+- 監査工程で実際に試行・導入・運用したことが確認できる場合だけ、更新候補にしてください。
+- 「検討」「可能」「期待」「活用できる」だけでは成熟度2以上の根拠になりません。
+- 更新なしなら現在の内容を維持し、status=unchangedとしてください。
 
 今週のニュース候補:
 {news}
@@ -103,7 +121,7 @@ JSONだけを返してください。HTMLやMarkdownは禁止。
   "watch": ["", "", ""],
   "sources": [{{"name":"","url":""}}]
 }}
-process_updatesでは、更新なしなら現在の内容を維持し、status=unchangedとしてください。更新ありの場合だけcurrent/reason/maturityを変更してください。maturityは1～5です。AIは監査判断を代替せず、原資料・ログによる人間の検証が必要という前提を維持してください。'''
+process_updatesのmaturityは上記定義に従う1～5の候補値です。最終的な成熟度は後段の固定Python処理でも検証・制限されます。AIは監査判断を代替せず、原資料・ログによる人間の検証が必要という前提を維持してください。'''
     result = parse_json(call_gemini(prompt))
 
     updates = result.get("process_updates", {})
@@ -140,12 +158,15 @@ process_updatesでは、更新なしなら現在の内容を維持し、status=u
         html.append('</ul></section>')
     html.append(f'<section><h2>6. 内部監査への示唆</h2><p>{escape(str(result.get("audit_implication","")))}</p></section>')
     html.append('<section><h2>7. 内部監査プロセスの高度化への有用性</h2><table><tr><th>工程</th><th>状態</th><th>成熟度</th><th>内容</th></tr>')
+    labels = {"1":"① リスク評価","2":"② 監査計画","3":"③ 資料収集","4":"④ 分析・検証","5":"⑤ 指摘・原因分析","6":"⑥ 報告","7":"⑦ フォローアップ"}
     for key in map(str, range(1,8)):
         p = old[key]
         cls = "updated" if p["status"] == "updated" else "unchanged"
         label = "更新あり" if p["status"] == "updated" else "更新なし"
-        html.append(f'<tr><td>① リスク評価</td>' if key=="1" else f'<tr><td>② 監査計画</td>' if key=="2" else f'<tr><td>③ 資料収集</td>' if key=="3" else f'<tr><td>④ 分析・検証</td>' if key=="4" else f'<tr><td>⑤ 指摘・原因分析</td>' if key=="5" else f'<tr><td>⑥ 報告</td>' if key=="6" else f'<tr><td>⑦ フォローアップ</td>')
-        html.append(f'<td class="{cls}">{label}</td><td>{p.get("maturity",1)}/5</td><td>{escape(p["current"])}</td></tr>')
+        html.append(f'<tr><td>{labels[key]}</td><td class="{cls}">{label}</td><td>{p.get("maturity",1)}/5</td><td>{escape(p["current"])}</td></tr>')
+    html.append('</table><h3>成熟度の判定基準</h3><table><tr><th>Lv</th><th>基準</th></tr>')
+    for level, description in MATURITY_RUBRIC.items():
+        html.append(f'<tr><td>{level}/5</td><td>{escape(description)}</td></tr>')
     html.append('</table><p><strong>原則：</strong>AIの出力は監査証拠そのものではありません。原資料・ログ・承認記録と突き合わせ、監査人が最終判断します。</p></section>')
     html.append('<section><h2>8. 今後ウォッチすべき事項</h2><ul>' + ''.join(li(x) for x in result.get("watch", [])[:5]) + '</ul></section>')
     html.append('<section><h2>9. 情報源</h2><ul>')
