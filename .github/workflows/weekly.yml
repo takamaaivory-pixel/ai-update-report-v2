@@ -29,12 +29,16 @@ jobs:
       - name: Normalize audit state
         run: python -u scripts/normalize_audit_state.py
 
+      - name: Generate maturity dashboard
+        run: python -u scripts/generate_dashboard.py
+
       - name: Validate V2 output
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           html = Path('index.html').read_text(encoding='utf-8')
+          dashboard = Path('dashboard.html').read_text(encoding='utf-8')
           state = json.loads(Path('data/audit_process_state.json').read_text(encoding='utf-8'))
           required = [
               '今週の重要アップデートTOP5','ChatGPT / OpenAI','Gemini / Google',
@@ -53,6 +57,9 @@ jobs:
           dates = [x.get('date') for x in state.get('history', [])]
           if len(dates) != len(set(dates)):
               raise SystemExit('History contains duplicate dates.')
+          for token in ['7工程の成熟度推移', '成熟度の判定基準', '現在地']:
+              if token not in dashboard:
+                  raise SystemExit('Missing dashboard section: ' + token)
           print('V2 validation passed.')
           PY
 
@@ -60,7 +67,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add index.html data/audit_process_state.json
+          git add index.html dashboard.html data/audit_process_state.json
           if git diff --cached --quiet; then
             echo 'No changes to commit.'
           else
