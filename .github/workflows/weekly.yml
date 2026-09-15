@@ -24,7 +24,28 @@ jobs:
       - name: Generate structured report
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python -u scripts/generate_report.py
+        run: |
+          set +e
+          for attempt in 1 2 3 4 5; do
+            echo "Gemini report generation attempt ${attempt}/5"
+            output=$(python -u scripts/generate_report.py 2>&1)
+            status=$?
+            printf '%s\n' "$output"
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            if ! printf '%s\n' "$output" | grep -q 'HTTP Error 503: Service Unavailable'; then
+              echo 'Non-503 error: failing without retry.'
+              exit "$status"
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo 'Gemini HTTP 503 persisted after 5 attempts.'
+              exit "$status"
+            fi
+            wait=$((30 * 2 ** (attempt - 1)))
+            echo "Gemini HTTP 503 retry ${attempt}/5; waiting ${wait}s."
+            sleep "$wait"
+          done
 
       - name: Normalize audit state
         run: python -u scripts/normalize_audit_state.py
