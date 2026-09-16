@@ -8,6 +8,13 @@ LABELS = {
     '1': '① リスク評価', '2': '② 監査計画', '3': '③ 資料収集',
     '4': '④ 分析・検証', '5': '⑤ 指摘・原因分析', '6': '⑥ 報告', '7': '⑦ フォローアップ'
 }
+RUBRIC = {
+    1: '検討・情報収集',
+    2: '試行・一部導入',
+    3: '定型・定常運用',
+    4: '複数工程・部門連携',
+    5: '継続監視＋改善サイクル',
+}
 
 
 def esc(value):
@@ -16,10 +23,8 @@ def esc(value):
 
 def main():
     state = json.loads(STATE_PATH.read_text(encoding='utf-8'))
-    history = state.get('history', [])
-    # One snapshot per date is expected after normalization.
-    history = [x for x in history if x.get('date')]
-    history = history[-26:]
+    history = [x for x in state.get('history', []) if x.get('date')][-26:]
+    current = state.get('processes', {})
     changes = {x['process']: x for x in state.get('maturity_changes', [])}
 
     width, height = 980, 420
@@ -44,13 +49,11 @@ def main():
     for key in map(str, range(1, 8)):
         vals = [int(s.get('processes', {}).get(key, {}).get('maturity', 1)) for s in history]
         points = ' '.join(f'{x(i):.1f},{y(v):.1f}' for i, v in enumerate(vals))
-        # Use default SVG palette via CSS classes; no fixed semantic color is assigned.
         svg.append(f'<polyline points="{points}" fill="none" stroke-width="3" class="line-{key}"/>')
         for i, v in enumerate(vals):
             svg.append(f'<circle cx="{x(i):.1f}" cy="{y(v):.1f}" r="4" class="line-{key}"/>')
     svg.append('</svg>')
 
-    current = state.get('processes', {})
     rows = []
     for key in map(str, range(1, 8)):
         p = current.get(key, {})
@@ -58,22 +61,42 @@ def main():
         delta = int(c.get('delta', 0))
         sign = f'+{delta}' if delta > 0 else str(delta)
         trend = '↗' if delta > 0 else ('↘' if delta < 0 else '→')
-        rows.append(f'<tr><td>{LABELS[key]}</td><td><strong>Lv{int(p.get("maturity", 1))}/5</strong></td><td>{sign} {trend}</td><td>{"更新あり" if p.get("status") == "updated" else "更新なし"}</td><td>{esc(p.get("change_reason", ""))}</td></tr>')
+        state_text = '更新あり' if p.get('status') == 'updated' else '更新なし'
+        rows.append(
+            f'<tr><td>{LABELS[key]}</td><td><strong>Lv{int(p.get("maturity", 1))}/5</strong><br><span class="small">{esc(RUBRIC.get(int(p.get("maturity", 1)), ""))}</span></td><td class="trend">{sign} {trend}</td><td>{state_text}</td><td>{esc(p.get("change_reason", ""))}</td></tr>'
+        )
 
-    rubric = [
-        (1, '検討・情報収集'), (2, '試行・一部導入'), (3, '定型・定常運用'),
-        (4, '複数工程・部門連携'), (5, '継続監視＋改善サイクル')
-    ]
-    rubric_rows = ''.join(f'<tr><td>Lv{n}</td><td>{esc(d)}</td></tr>' for n, d in rubric)
+    changed_items = []
+    for key in map(str, range(1, 8)):
+        c = changes.get(key, {})
+        delta = int(c.get('delta', 0))
+        if delta != 0 or c.get('status') == 'updated':
+            arrow = f'{c.get("previous_maturity", 1)} → {c.get("current_maturity", 1)}'
+            changed_items.append(f'<article class="change-card"><h3>{LABELS[key]}</h3><div class="change-level">Lv{esc(arrow)}</div><p>{esc(c.get("reason") or current.get(key, {}).get("change_reason", "内容更新"))}</p><p class="small">※成熟度変更の最終判断には、原資料・ログ・承認記録等の確認が必要です。</p></article>')
+    if not changed_items:
+        changed_items.append('<article class="change-card"><h3>今週は成熟度の変化なし</h3><p>「更新なし」も履歴として保持しています。変化が発生した週に、この欄へ理由が表示されます。</p></article>')
+
+    history_rows = []
+    for snap in reversed(history):
+        vals = [int(snap.get('processes', {}).get(k, {}).get('maturity', 1)) for k in map(str, range(1, 8))]
+        history_rows.append(f'<tr><td>{esc(snap["date"])}</td><td>{" / ".join(str(v) for v in vals)}</td></tr>')
+
+    rubric_rows = ''.join(f'<tr><td>Lv{n}</td><td>{esc(d)}</td></tr>' for n, d in RUBRIC.items())
+    current_levels = [int(current.get(k, {}).get('maturity', 1)) for k in map(str, range(1, 8))]
+    avg = sum(current_levels) / len(current_levels) if current_levels else 0
+    max_level = max(current_levels) if current_levels else 0
+    max_names = [LABELS[str(i + 1)] for i, v in enumerate(current_levels) if v == max_level]
 
     html = f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI×内部監査 成熟度ダッシュボード</title><style>
-body{{font-family:system-ui,-apple-system,sans-serif;background:#f4f6f8;color:#202124;margin:0;padding:16px;line-height:1.6}}main{{max-width:1050px;margin:auto}}header,section,footer{{background:#fff;padding:20px;border-radius:14px;margin-bottom:16px;box-shadow:0 2px 10px #0001}}h1{{margin:0 0 6px}}h2{{border-bottom:2px solid #eee;padding-bottom:6px}}table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid #ddd;padding:9px;text-align:left;vertical-align:top}}th{{background:#f7f7f7}}svg{{width:100%;height:auto;min-height:300px}}.line-1{{stroke:#6b7280;fill:#6b7280}}.line-2{{stroke:#2563eb;fill:#2563eb}}.line-3{{stroke:#16a34a;fill:#16a34a}}.line-4{{stroke:#dc2626;fill:#dc2626}}.line-5{{stroke:#9333ea;fill:#9333ea}}.line-6{{stroke:#ea580c;fill:#ea580c}}.line-7{{stroke:#0891b2;fill:#0891b2}}.note{{color:#5f6368}}@media(max-width:600px){{body{{padding:8px}}header,section,footer{{padding:13px}}table{{display:block;overflow-x:auto}}svg{{min-width:720px}}.chart-wrap{{overflow-x:auto}}}}</style></head><body><main>
-<header><h1>AI × 内部監査 成熟度ダッシュボード</h1><p><strong>基準日：</strong>{esc(state.get('last_updated',''))}</p><p class="note">内部監査7工程について、蓄積した週次スナップショットから成熟度の推移と前週比を確認します。</p></header>
-<section><h2>現在地</h2><table><tr><th>工程</th><th>現在</th><th>前週比</th><th>状態</th><th>変化理由</th></tr>{''.join(rows)}</table></section>
-<section><h2>7工程の成熟度推移</h2><div class="chart-wrap">{''.join(svg)}</div><p class="note">表示は直近26スナップショット（最大約半年）。成熟度はAI機能の性能ではなく、監査工程への実運用の定着度を示します。</p></section>
-<section><h2>成熟度の判定基準</h2><table><tr><th>レベル</th><th>基準</th></tr>{rubric_rows}</table></section>
-<section><h2>今週の変化</h2><ul>{''.join(f'<li>{LABELS[k]}：Lv{c.get("previous_maturity", 1)} → Lv{c.get("current_maturity", 1)}（{("+"+str(c.get("delta"))) if int(c.get("delta",0))>0 else str(c.get("delta",0))}）{esc(c.get("reason", ""))}</li>' for k,c in changes.items() if int(c.get('delta',0)) != 0 or c.get('status') == 'updated') or '<li>成熟度の変化なし</li>'}</ul></section>
-<footer><p>AIの出力は監査証拠そのものではありません。原資料・ログ・承認記録と突き合わせ、人間が最終判断します。</p><p><a href="index.html">週刊レポートへ戻る</a></p></footer></main></body></html>'''
+body{{font-family:system-ui,-apple-system,sans-serif;background:#f4f6f8;color:#202124;margin:0;padding:16px;line-height:1.65}}main{{max-width:1050px;margin:auto}}header,section,footer{{background:#fff;padding:20px;border-radius:14px;margin-bottom:16px;box-shadow:0 2px 10px #0001}}h1{{margin:0 0 6px}}h2{{border-bottom:2px solid #eee;padding-bottom:6px}}h3{{margin-top:0}}table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid #ddd;padding:9px;text-align:left;vertical-align:top}}th{{background:#f7f7f7}}.small,.note{{color:#5f6368;font-size:.9em}}.trend{{font-weight:700;white-space:nowrap}}.summary{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}.metric{{background:#f7f7f7;border-radius:12px;padding:14px}}.metric strong{{display:block;font-size:1.5em}}.change-grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}}.change-card{{border:1px solid #ddd;border-radius:12px;padding:14px;background:#fafafa}}.change-level{{font-size:1.3em;font-weight:700}}.chart-wrap{{overflow-x:auto}}svg{{width:100%;height:auto;min-height:300px}}.line-1{{stroke:#6b7280;fill:#6b7280}}.line-2{{stroke:#2563eb;fill:#2563eb}}.line-3{{stroke:#16a34a;fill:#16a34a}}.line-4{{stroke:#dc2626;fill:#dc2626}}.line-5{{stroke:#9333ea;fill:#9333ea}}.line-6{{stroke:#ea580c;fill:#ea580c}}.line-7{{stroke:#0891b2;fill:#0891b2}}.legend{{display:flex;flex-wrap:wrap;gap:8px 16px;margin:8px 0}}.legend span{{white-space:nowrap}}@media(max-width:700px){{body{{padding:8px}}header,section,footer{{padding:13px}}.summary,.change-grid{{grid-template-columns:1fr}}table{{display:block;overflow-x:auto}}svg{{min-width:720px}}}}</style></head><body><main>
+<header><h1>AI × 内部監査 成熟度ダッシュボード</h1><p><strong>基準日：</strong>{esc(state.get('last_updated',''))}</p><div class="summary"><div class="metric"><span class="small">7工程平均</span><strong>{avg:.2f} / 5</strong></div><div class="metric"><span class="small">現在の最高レベル</span><strong>Lv{max_level}</strong></div><div class="metric"><span class="small">先行工程</span><strong>{esc('、'.join(max_names))}</strong></div></div><p class="note">この数値はAI機能の性能評価ではなく、内部監査工程への実運用の定着度を記録するための管理指標です。</p></header>
+<section><h2>1. 現在地</h2><table><tr><th>工程</th><th>現在</th><th>前週比</th><th>状態</th><th>変化理由</th></tr>{''.join(rows)}</table></section>
+<section><h2>2. 7工程の成熟度推移</h2><div class="legend">{''.join(f'<span>● {LABELS[str(k)]}</span>' for k in range(1,8))}</div><div class="chart-wrap">{''.join(svg)}</div><p class="note">直近26スナップショット（最大約半年）を表示。週次実行を継続すると、工程ごとの長期トレンドが蓄積されます。</p></section>
+<section><h2>3. 今週の変化・確認ポイント</h2><div class="change-grid">{''.join(changed_items)}</div></section>
+<section><h2>4. 成熟度の判定基準</h2><table><tr><th>レベル</th><th>意味</th></tr>{rubric_rows}</table><p class="note">ニュースやAI機能の発表だけでは成熟度を上げません。実際の試行・導入・定型運用等が確認できる場合にのみ更新候補とします。</p></section>
+<section><h2>5. 週次スナップショット履歴</h2><table><tr><th>基準日</th><th>① ② ③ ④ ⑤ ⑥ ⑦</th></tr>{''.join(history_rows)}</table><p class="note">「更新なし」の週も保存します。これにより、変化が起きなかった期間も含めて高度化の経過を説明できます。</p></section>
+<section><h2>6. このダッシュボードの読み方</h2><ol><li><strong>現在地</strong>で、7工程の今の状態を30秒で確認します。</li><li><strong>推移</strong>で、どの工程がいつ変化したかを確認します。</li><li><strong>変化・確認ポイント</strong>で、AIが示した更新理由を確認します。</li><li>重要な変更については、原資料・ログ・承認記録などを人間が確認してから、監査上の判断に利用します。</li></ol></section>
+<footer><p><strong>運用原則：</strong>AIの出力は監査証拠そのものではありません。AIは情報整理と変化候補の抽出を担い、人間が根拠を確認して最終判断します。</p><p><a href="index.html">週刊レポートへ戻る</a></p></footer></main></body></html>'''
     OUTPUT_PATH.write_text(html, encoding='utf-8')
     print(f'Generated {OUTPUT_PATH}')
 
