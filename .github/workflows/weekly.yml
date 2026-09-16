@@ -47,6 +47,24 @@ jobs:
             sleep "$wait"
           done
 
+      - name: Add report dashboard navigation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('index.html')
+          html = p.read_text(encoding='utf-8')
+          link = '<p><a href="dashboard.html" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#eef2ff;color:#1d4ed8;text-decoration:none;font-weight:700">📊 7工程の成熟度ダッシュボードを見る</a></p>'
+          if 'dashboard.html' not in html:
+              marker = '</header>'
+              if marker not in html:
+                  raise SystemExit('Report header not found; dashboard link was not inserted.')
+              html = html.replace(marker, link + marker, 1)
+              p.write_text(html, encoding='utf-8')
+              print('Dashboard navigation added to report.')
+          else:
+              print('Dashboard navigation already present.')
+          PY
+
       - name: Normalize audit state
         run: python -u scripts/normalize_audit_state.py
 
@@ -75,6 +93,8 @@ jobs:
               raise SystemExit('History was not recorded.')
           if missing:
               raise SystemExit('Missing HTML sections: ' + ', '.join(missing))
+          if 'dashboard.html' not in html:
+              raise SystemExit('Missing report-to-dashboard navigation link.')
           dates = [x.get('date') for x in state.get('history', [])]
           if len(dates) != len(set(dates)):
               raise SystemExit('History contains duplicate dates.')
