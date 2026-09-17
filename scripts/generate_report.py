@@ -26,6 +26,44 @@ MATURITY_RUBRIC = {
     5: "高度化段階：継続監視とフィードバックを伴う改善サイクル・自律運用が定着している",
 }
 
+RESPONSE_CLASSES = {
+    "required_now": "現在対応が必要", "required_if_used": "利用する場合に対応",
+    "consider": "今後検討", "information_only": "情報収集のみ",
+}
+PROCESS_LABELS = {
+    "1": "① リスク評価", "2": "② 監査計画", "3": "③ 資料収集", "4": "④ 分析・検証",
+    "5": "⑤ 指摘・原因分析", "6": "⑥ 報告", "7": "⑦ フォローアップ",
+}
+
+def as_text_list(value, limit=5):
+    return [str(x).strip() for x in value if str(x).strip()][:limit] if isinstance(value, list) else []
+
+def normalize_v24(result):
+    top5 = result.get("top5", []) if isinstance(result.get("top5", []), list) else []
+    items = []
+    for i, raw in enumerate(top5[:5], 1):
+        raw = raw if isinstance(raw, dict) else {}
+        cls = str(raw.get("response_classification", "information_only"))
+        cls = cls if cls in RESPONSE_CLASSES else "information_only"
+        item = dict(raw)
+        item.update({"id": f"U{i}", "response_classification": cls,
+                     "related_audit_processes": [str(x) for x in raw.get("related_audit_processes", []) if str(x) in PROCESS_LABELS],
+                     "audit_impact": str(raw.get("audit_impact") or raw.get("audit") or ""),
+                     "recommended_actions": as_text_list(raw.get("recommended_actions")),
+                     "maturity_impact": str(raw.get("maturity_impact") or "現時点では成熟度への変更なし")})
+        items.append(item)
+    result["top5"] = items
+    valid_ids = {x["id"] for x in items}
+    watches = result.get("watch", []) if isinstance(result.get("watch", []), list) else []
+    result["watch"] = [{"theme": str((x if isinstance(x, dict) else {"theme": x}).get("theme", "")),
+                         "source_update_ids": [str(v) for v in (x if isinstance(x, dict) else {}).get("source_update_ids", []) if str(v) in valid_ids],
+                         "watch_reason": str((x if isinstance(x, dict) else {}).get("watch_reason", "")),
+                         "response_classification": str((x if isinstance(x, dict) else {}).get("response_classification", "information_only")),
+                         "recommended_action": str((x if isinstance(x, dict) else {}).get("recommended_action", ""))} for x in watches[:5]]
+    for x in result["watch"]:
+        if x["response_classification"] not in RESPONSE_CLASSES: x["response_classification"] = "information_only"
+    return result
+
 
 def fetch_news(query, limit=6):
     params = urllib.parse.urlencode({"q": f"{query} when:7d", "hl": "en-US", "gl": "US", "ceid": "US:en"})
@@ -122,15 +160,15 @@ def main():
 JSONだけを返してください。HTMLやMarkdownは禁止。
 形式:
 {{
-  "top5": [{{"title":"", "type":"新規|変更|継続|終了", "importance":"★★★|★★☆|★☆☆", "fact":"", "audit":""}}],
+  "top5": [{{"title":"", "type":"新規|変更|継続|終了", "importance":"★★★|★★☆|★☆☆", "fact":"", "audit_impact":"", "response_classification":"required_now|required_if_used|consider|information_only", "related_audit_processes":["1"], "recommended_actions":[""], "maturity_impact":""}}],
   "companies": {{"openai":[],"gemini":[],"claude":[],"microsoft":[]}},
   "audit_implication":"",
   "process_updates": {{"1":{{"status":"updated|unchanged","current":"","reason":"","maturity":1}},"2":{{}},"3":{{}},"4":{{}},"5":{{}},"6":{{}},"7":{{}}}},
-  "watch": ["", "", ""],
+  "watch": [{{"theme":"", "source_update_ids":["U1"], "watch_reason":"", "response_classification":"information_only", "recommended_action":""}}],
   "sources": [{{"name":"","url":""}}]
 }}
 process_updatesのmaturityは上記定義に従う1～5の候補値です。最終的な成熟度は後段の固定Python処理でも検証・制限されます。AIは監査判断を代替せず、原資料・ログによる人間の検証が必要という前提を維持してください。'''
-    result = parse_json(call_gemini(prompt))
+    result = normalize_v24(parse_json(call_gemini(prompt)))
 
     updates = result.get("process_updates", {})
     for key, item in old.items():
@@ -170,9 +208,12 @@ process_updatesのmaturityは上記定義に従う1～5の候補値です。最�
     def li(text): return "<li>" + escape(str(text)) + "</li>"
     html = ['<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI・内部監査継続的高度化レポート</title><style>body{font-family:system-ui,-apple-system,sans-serif;background:#f4f6f8;color:#202124;margin:0;padding:18px;line-height:1.7}main{max-width:1000px;margin:auto}section,header,footer{background:white;padding:20px;border-radius:14px;margin-bottom:16px;box-shadow:0 2px 10px #0001}h1{margin-top:0}h2{border-bottom:2px solid #eee;padding-bottom:6px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:9px;vertical-align:top}th{background:#f7f7f7}.updated{background:#fde7e9;color:#b3261e;font-weight:700}.unchanged{background:#f1f3f4;color:#5f6368;font-weight:700}.score{font-size:1.4em}.up{font-weight:700}.flat{font-weight:600}@media(max-width:600px){body{padding:9px}section,header,footer{padding:14px}table{display:block;overflow-x:auto}}</style></head><body><main>']
     html.append(f'<header><h1>AI・内部監査継続的高度化レポート</h1><p><strong>基準日：</strong>{escape(TODAY)}</p><p>AIアップデートを内部監査7工程の継続的な高度化へ結び付け、前週からの変化を蓄積します。</p></header>')
-    html.append('<section><h2>1. 今週の重要アップデートTOP5</h2><table><tr><th>重要度</th><th>項目</th><th>確認できた事実</th><th>監査上の確認事項</th></tr>')
+    html.append('<section><h2>1. 今週の重要アップデートTOP5</h2><p>各情報について、現時点の自社対応と内部監査への関係を分けて表示します。</p><table><tr><th>重要度</th><th>項目・自社対応</th><th>確認できた事実</th><th>監査への影響・関連工程・推奨アクション・成熟度への影響</th></tr>')
     for x in result.get("top5", [])[:5]:
-        html.append(f'<tr><td class="score">{escape(str(x.get("importance","")))}</td><td><strong>{escape(str(x.get("type","")))}</strong><br>{escape(str(x.get("title","")))}</td><td>{escape(str(x.get("fact","")))}</td><td>{escape(str(x.get("audit","")))}</td></tr>')
+        processes = "、".join(PROCESS_LABELS[p] for p in x["related_audit_processes"]) or "該当工程なし（情報収集）"
+        actions = "<br>".join("・" + escape(a) for a in x["recommended_actions"]) or "個別アクションなし"
+        detail = f'<strong>内部監査への影響：</strong>{escape(x["audit_impact"])}<br><strong>関連する内部監査7工程：</strong>{escape(processes)}<br><strong>推奨アクション：</strong>{actions}<br><strong>成熟度への影響：</strong>{escape(x["maturity_impact"])}'
+        html.append(f'<tr><td class="score">{escape(str(x.get("importance","")))}</td><td><strong>{escape(str(x.get("type","")))}</strong><br>{escape(str(x.get("title","")))}<br><strong>自社対応：</strong>{escape(RESPONSE_CLASSES[x["response_classification"]])}</td><td>{escape(str(x.get("fact","")))}</td><td>{detail}</td></tr>')
     html.append('</table></section>')
     names = [("openai","2. ChatGPT / OpenAI"),("gemini","3. Gemini / Google"),("claude","4. Claude / Anthropic"),("microsoft","5. Microsoft Copilot")]
     for key, heading in names:
@@ -203,7 +244,10 @@ process_updatesのmaturityは上記定義に従う1～5の候補値です。最�
     if not any(c["delta"] != 0 or c["status"] == "updated" for c in changes):
         html.append(li("成熟度の変化はありません。"))
     html.append('</ul><p><strong>原則：</strong>AIの出力は監査証拠そのものではありません。原資料・ログ・承認記録と突き合わせ、監査人が最終判断します。</p></section>')
-    html.append('<section><h2>8. 今後ウォッチすべき事項</h2><ul>' + ''.join(li(x) for x in result.get("watch", [])[:5]) + '</ul></section>')
+    html.append('<section><h2>8. 今後ウォッチすべき事項</h2><table><tr><th>テーマ</th><th>今回の関連アップデート</th><th>ウォッチ理由</th><th>自社対応・推奨アクション</th></tr>')
+    for x in result.get("watch", [])[:5]:
+        html.append(f'<tr><td>{escape(x["theme"])}</td><td>{escape("、".join(x["source_update_ids"]) or "明示的な紐付けなし")}</td><td>{escape(x["watch_reason"])}</td><td><strong>{escape(RESPONSE_CLASSES[x["response_classification"]])}</strong><br>{escape(x["recommended_action"])}</td></tr>')
+    html.append('</table></section>')
     html.append('<section><h2>9. 情報源</h2><ul>')
     for s in result.get("sources", []):
         url, name = str(s.get("url","")), str(s.get("name",""))
